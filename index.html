@@ -467,6 +467,10 @@ function rebalancearClasse(classe){
     auto.forEach(a=>{a.meta=cada;});
   }
 }
+function rebalancearTodas(){
+  const classes=[...new Set(S.ativos.map(a=>a.classe))];
+  classes.forEach(c=>rebalancearClasse(c));
+}
 function setMetaManual(id,val){
   const a=S.ativos.find(x=>x.id===id);if(!a)return;
   a.meta=Math.max(0,Math.min(100,parseFloat(val)||0));
@@ -815,7 +819,7 @@ document.getElementById('bk-file').addEventListener('change',e=>{
       d.snap=d.snap||{};d.cfg=d.cfg||{};d.cfg.heroMode=d.cfg.heroMode||'patr';
       d.cfg.metaClasse=d.cfg.metaClasse||{};
       if(!confirm('Substituir os dados atuais pelo backup ('+d.ativos.length+' ativos, '+d.lanc.length+' lançamentos)?'))return;
-      S=d;save();applyBastter();renderAll();
+      S=d;rebalancearTodas();save();applyBastter();renderAll();
     }catch(err){alert('Arquivo inválido — precisa ser um JSON exportado por este app.');}
   };
   r.readAsText(f);e.target.value='';
@@ -914,6 +918,7 @@ async function atualizaCotacoes(){
 function renderAll(){renderAtivos();renderLanc();renderProv();renderResumo();renderBalanco();}
 document.getElementById('cfg-brapi').value=S.cfg.brapiToken||'';
 document.getElementById('cfg-finnhub').value=S.cfg.finnhubToken||'';
+rebalancearTodas();save();
 applyBastter();renderAll();
 </script>
 </body>
