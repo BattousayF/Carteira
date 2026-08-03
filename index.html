@@ -265,7 +265,7 @@ footer .serif{font-size:14px}
       <div><label>Ticker / nome curto</label><input id="a-ticker" required placeholder="ITSA4, MXRF11, BTC, USDT, USDC…"></div>
       <div><label>Classe</label><select id="a-classe"></select></div>
       <div><label>Nota (0–10)</label><input id="a-nota" type="number" min="0" max="10" step="1" value="10"></div>
-      <div><label>Meta na carteira (%)</label><input id="a-meta" type="number" min="0" max="100" step="0.5" value="0"></div>
+      <div><label>Meta dentro da classe (%)</label><input id="a-meta" type="number" min="0" max="100" step="0.5" value="0"></div>
       <div class="sens"><label>Preço atual (R$)</label><input id="a-preco" type="number" min="0" step="0.00000001" placeholder="opcional"></div>
     </form>
     <div class="frow">
@@ -273,6 +273,7 @@ footer .serif{font-size:14px}
       <button class="btn ghost" id="a-cancel" style="display:none">Cancelar edição</button>
     </div>
     <p class="note">A nota segue a filosofia Bastter: quanto melhor a empresa/fundo, maior a nota. Ela pesa na sugestão de aporte, junto com a distância até a meta.</p>
+    <p class="note">A meta aqui é <b>dentro da classe</b>, não do total da carteira: se você tem 10 ações e dá 10% pra cada uma, e a classe Ação vale 40% no Balanço, cada ação representa 4% do total (10% × 40%). Se um ativo é o único da classe (ex: seu único Bitcoin), a meta dele deve ser 100% — aí ele herda os 100% da fatia da classe inteira. Some as metas de cada classe até fechar perto de 100% (o aviso abaixo avisa quando não fecha).</p>
     <p class="warn" id="meta-warn" style="display:none"></p>
   </div>
   <div class="panel">
@@ -306,7 +307,7 @@ footer .serif{font-size:14px}
 <section class="tab" id="tab-aporte">
   <div class="panel">
     <h2>Sugestão de aporte</h2>
-    <p class="cedro-hero">Estilo Diagrama do Cedro: o dinheiro novo vai para os melhores ativos que estão mais abaixo da meta. Peso = nota × (meta − alocação atual).</p>
+    <p class="cedro-hero">Estilo Diagrama do Cedro: o dinheiro novo vai para os melhores ativos que estão mais abaixo da meta. Peso = nota × (meta efetiva no total − alocação atual), onde a meta efetiva é a meta da classe (Balanço) × a meta do ativo dentro da classe.</p>
     <form class="f" onsubmit="return false" style="max-width:340px">
       <div><label>Valor do aporte (R$)</label><input id="cedro-val" type="number" min="0" step="0.01" placeholder="1000,00"></div>
     </form>
@@ -499,12 +500,13 @@ function delAtivo(id){
   S.prov=S.prov.filter(p=>p.ativoId!==id);
   save();renderAll();
 }
+function metaEfetiva(a){return (S.cfg.metaClasse[a.classe]||0)*(a.meta||0)/100;}
 function renderAtivos(){
   const {arr,patr}=deriva();
   const el=document.getElementById('lst-ativos');
   if(!arr.length){el.innerHTML='<div class="empty"><span class="serif">Nenhum ativo ainda</span>Cadastre o primeiro acima — depois registre as compras na aba Lançamentos.</div>';}
   else{
-    el.innerHTML='<table><thead><tr><th>Ativo</th><th>Classe</th><th class="num">Nota</th><th class="num">Cotas</th><th class="num">PM</th><th class="num sens">Preço</th><th class="num sens">Valor</th><th class="num">Atual %</th><th class="num">Meta %</th><th></th></tr></thead><tbody>'+
+    el.innerHTML='<table><thead><tr><th>Ativo</th><th>Classe</th><th class="num">Nota</th><th class="num">Cotas</th><th class="num">PM</th><th class="num sens">Preço</th><th class="num sens">Valor</th><th class="num">Atual %</th><th class="num">Meta (classe)</th><th class="num">Meta (total)</th><th></th></tr></thead><tbody>'+
     arr.map(a=>'<tr><td class="tick">'+esc(a.ticker)+'</td><td><span class="tag">'+esc(a.classe)+'</span></td>'+
       '<td class="num"><span class="nota">'+a.nota+'</span></td>'+
       '<td class="num">'+fmtQ(a.qtd)+'</td>'+
@@ -513,13 +515,17 @@ function renderAtivos(){
       '<td class="num sens">'+fmt(a.valor)+'</td>'+
       '<td class="num">'+a.pct.toFixed(1)+'%</td>'+
       '<td class="num">'+a.meta.toFixed(1)+'%</td>'+
+      '<td class="num">'+metaEfetiva(a).toFixed(1)+'%</td>'+
       '<td><button class="act" onclick="editAtivo(\''+a.id+'\')" title="Editar">✎</button><button class="act" onclick="delAtivo(\''+a.id+'\')" title="Apagar">🗑</button></td></tr>').join('')+
     '</tbody></table>';
   }
-  const somaMeta=S.ativos.reduce((s,a)=>s+(a.meta||0),0);
+  const porClasse={};
+  S.ativos.forEach(a=>{porClasse[a.classe]=(porClasse[a.classe]||0)+(a.meta||0);});
+  const off=Object.keys(porClasse).filter(c=>Math.abs(porClasse[c]-100)>0.5);
   const w=document.getElementById('meta-warn');
-  if(S.ativos.length&&Math.abs(somaMeta-100)>0.5){
-    w.style.display='';w.textContent='Atenção: a soma das metas está em '+somaMeta.toFixed(1)+'% (o ideal é fechar em 100%).';
+  if(off.length){
+    w.style.display='';
+    w.textContent='A soma das metas dentro da classe não fecha 100% em: '+off.map(c=>c+' ('+porClasse[c].toFixed(1)+'%)').join(', ')+'.';
   }else w.style.display='none';
   ['l-ativo','p-ativo'].forEach(id=>{
     const s=document.getElementById(id);const cur=s.value;
@@ -626,14 +632,15 @@ document.getElementById('cedro-go').addEventListener('click',()=>{
   if(!cand.length){out.innerHTML='<div class="empty"><span class="serif">Sem candidatos</span>Dê nota e meta de alocação aos seus ativos na aba Ativos.</div>';return;}
   const novoPatr=patr+val;
   let pesos=cand.map(a=>{
-    const gap=a.meta-(novoPatr>0?100*a.valor/novoPatr:0);
-    return {a,peso:a.nota*Math.max(0,gap)};
+    const alvo=metaEfetiva(a); // % do total = meta da classe (Balanço) × meta dentro da classe
+    const gap=alvo-(novoPatr>0?100*a.valor/novoPatr:0);
+    return {a,alvo,peso:a.nota*Math.max(0,gap)};
   });
   let soma=pesos.reduce((s,x)=>s+x.peso,0);
   if(soma<=0){
-    pesos=cand.map(a=>({a,peso:a.nota}));
+    pesos=cand.map(a=>({a,alvo:metaEfetiva(a),peso:a.nota}));
     soma=pesos.reduce((s,x)=>s+x.peso,0);
-    out.innerHTML='<p class="note">Todos os ativos estão na meta ou acima — sugestão distribuída proporcionalmente à nota.</p>';
+    out.innerHTML='<p class="note">Todos os ativos estão na meta ou acima (ou falta definir a meta da classe no Balanço) — sugestão distribuída proporcionalmente à nota.</p>';
   }else out.innerHTML='';
   const maxPeso=Math.max(...pesos.map(x=>x.peso));
   const rows=pesos.filter(x=>x.peso>0).sort((a,b)=>b.peso-a.peso).map(x=>{
@@ -646,7 +653,7 @@ document.getElementById('cedro-go').addEventListener('click',()=>{
     }
     return '<tr><td class="tick">'+esc(x.a.ticker)+'</td>'+
       '<td class="num"><span class="nota">'+x.a.nota+'</span></td>'+
-      '<td class="num">'+x.a.pct.toFixed(1)+'%</td><td class="num">'+x.a.meta.toFixed(1)+'%</td>'+
+      '<td class="num">'+x.a.pct.toFixed(1)+'%</td><td class="num">'+x.alvo.toFixed(1)+'%</td>'+
       '<td><div class="bar"><i style="width:'+(100*x.peso/maxPeso).toFixed(0)+'%"></i></div></td>'+
       '<td class="num"><span class="sug-val">'+fmt(sug)+'</span></td>'+
       '<td class="num sens">'+(cotas>0?'≈ '+fmtQ(cotas):'—')+'</td>'+
@@ -654,8 +661,8 @@ document.getElementById('cedro-go').addEventListener('click',()=>{
         ?'<button class="btn sm" onclick="aceitaSug(\''+x.a.id+'\')">✓ Aportar</button>'
         :'<span class="note" style="margin:0" title="Defina o preço atual do ativo (ou atualize as cotações) para calcular as cotas">sem preço</span>')+'</td></tr>';
   }).join('');
-  out.innerHTML+='<table><thead><tr><th>Ativo</th><th class="num">Nota</th><th class="num">Atual</th><th class="num">Meta</th><th>Peso</th><th class="num">Sugestão</th><th class="num sens">Cotas</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>'+
-  '<p class="note">O botão ✓ Aportar registra a compra na hora, com a data de hoje, e desconta o valor do aporte restante. Nunca sugere venda — só direciona o dinheiro novo.</p>';
+  out.innerHTML+='<table><thead><tr><th>Ativo</th><th class="num">Nota</th><th class="num">Atual</th><th class="num">Meta (total)</th><th>Peso</th><th class="num">Sugestão</th><th class="num sens">Cotas</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>'+
+  '<p class="note">"Meta (total)" já é a meta efetiva no patrimônio inteiro (meta da classe no Balanço × meta do ativo dentro da classe). O botão ✓ Aportar registra a compra na hora, com a data de hoje, e desconta o valor do aporte restante. Nunca sugere venda — só direciona o dinheiro novo.</p>';
 });
 function aceitaSug(id){
   const s=cedroSug[id];if(!s)return;
