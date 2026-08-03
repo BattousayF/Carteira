@@ -818,21 +818,22 @@ async function atualizaCotacoes(){
   }
 
   // 3) Ações e FIIs da B3 + BDRs (ticker terminando em número, ex: TSLA34) → brapi.dev
+  // Uma requisição por ticker: o plano gratuito da brapi só aceita 1 ativo por chamada.
   const ehBDR=t=>/\d{2}$/.test(t);
   const b3=S.ativos.filter(a=>a.classe==='Ação'||a.classe==='FII'||(a.classe==='Exterior'&&ehBDR(a.ticker)));
   if(b3.length){
     if(!S.cfg.brapiToken){
       b3.forEach(a=>falha.push(a.ticker+' (sem token brapi)'));
     }else{
-      try{
-        const r=await fetch('https://brapi.dev/api/quote/'+b3.map(a=>a.ticker).join(',')+'?token='+encodeURIComponent(S.cfg.brapiToken));
-        const d=await r.json();
-        const mapa={};(d.results||[]).forEach(q=>mapa[q.symbol]=q.regularMarketPrice);
-        b3.forEach(a=>{
-          const p=mapa[a.ticker];
+      for(const a of b3){
+        try{
+          const r=await fetch('https://brapi.dev/api/quote/'+encodeURIComponent(a.ticker)+'?token='+encodeURIComponent(S.cfg.brapiToken));
+          const d=await r.json();
+          const q=(d.results||[])[0];
+          const p=q&&q.regularMarketPrice;
           if(p>0){a.preco=p;ok++;}else falha.push(a.ticker);
-        });
-      }catch(e){b3.forEach(a=>falha.push(a.ticker));}
+        }catch(e){falha.push(a.ticker);}
+      }
     }
   }
 
