@@ -265,7 +265,6 @@ footer .serif{font-size:14px}
       <div><label>Ticker / nome curto</label><input id="a-ticker" required placeholder="ITSA4, MXRF11, BTC, USDT, USDC…"></div>
       <div><label>Classe</label><select id="a-classe"></select></div>
       <div><label>Nota (0–10)</label><input id="a-nota" type="number" min="0" max="10" step="1" value="10"></div>
-      <div><label>Meta dentro da classe (%)</label><input id="a-meta" type="number" min="0" max="100" step="0.5" value="0"></div>
       <div class="sens"><label>Preço atual (R$)</label><input id="a-preco" type="number" min="0" step="0.00000001" placeholder="opcional"></div>
     </form>
     <div class="frow">
@@ -273,7 +272,7 @@ footer .serif{font-size:14px}
       <button class="btn ghost" id="a-cancel" style="display:none">Cancelar edição</button>
     </div>
     <p class="note">A nota segue a filosofia Bastter: quanto melhor a empresa/fundo, maior a nota. Ela pesa na sugestão de aporte, junto com a distância até a meta.</p>
-    <p class="note">A meta aqui é <b>dentro da classe</b>, não do total da carteira: se você tem 10 ações e dá 10% pra cada uma, e a classe Ação vale 40% no Balanço, cada ação representa 4% do total (10% × 40%). Se um ativo é o único da classe (ex: seu único Bitcoin), a meta dele deve ser 100% — aí ele herda os 100% da fatia da classe inteira. Some as metas de cada classe até fechar perto de 100% (o aviso abaixo avisa quando não fecha).</p>
+    <p class="note">A meta dentro da classe é <b>automática por padrão</b>: cadastrando 5 ações, cada uma nasce com 20% (100% ÷ 5). Editando a % de uma direto na tabela "Meus ativos", ela trava naquele valor e as demais recalculam sozinhas o restante, sempre dividindo igual entre elas. Pra destravar uma e devolvê-la ao automático, use o botão ⟳ ao lado.</p>
     <p class="warn" id="meta-warn" style="display:none"></p>
   </div>
   <div class="panel">
@@ -456,19 +455,50 @@ function applyBastter(){document.body.classList.toggle('bastter',!!S.cfg.bastter
 const selClasse=document.getElementById('a-classe');
 CLASSES.forEach(c=>selClasse.add(new Option(c,c)));
 let editId=null;
+
+function rebalancearClasse(classe){
+  const doClasse=S.ativos.filter(a=>a.classe===classe);
+  const travados=doClasse.filter(a=>a.metaAuto===false);
+  const auto=doClasse.filter(a=>a.metaAuto!==false);
+  const somaTravada=travados.reduce((s,a)=>s+(a.meta||0),0);
+  const resto=Math.max(0,100-somaTravada);
+  if(auto.length>0){
+    const cada=resto/auto.length;
+    auto.forEach(a=>{a.meta=cada;});
+  }
+}
+function setMetaManual(id,val){
+  const a=S.ativos.find(x=>x.id===id);if(!a)return;
+  a.meta=Math.max(0,Math.min(100,parseFloat(val)||0));
+  a.metaAuto=false;
+  rebalancearClasse(a.classe);
+  save();renderAtivos();
+}
+function setMetaAuto(id){
+  const a=S.ativos.find(x=>x.id===id);if(!a)return;
+  a.metaAuto=true;
+  rebalancearClasse(a.classe);
+  save();renderAtivos();
+}
+
 document.getElementById('a-save').addEventListener('click',()=>{
   const t=document.getElementById('a-ticker').value.trim().toUpperCase();
   if(!t){alert('Informe o ticker.');return;}
   const dado={
     ticker:t,classe:selClasse.value,
     nota:Math.max(0,Math.min(10,parseFloat(document.getElementById('a-nota').value)||0)),
-    meta:Math.max(0,parseFloat(document.getElementById('a-meta').value)||0),
     preco:parseFloat(document.getElementById('a-preco').value)||0
   };
-  if(editId){Object.assign(S.ativos.find(a=>a.id===editId),dado);}
-  else{
+  if(editId){
+    const alvo=S.ativos.find(a=>a.id===editId);
+    const classeAntiga=alvo.classe;
+    Object.assign(alvo,dado);
+    rebalancearClasse(classeAntiga);
+    if(classeAntiga!==dado.classe)rebalancearClasse(dado.classe);
+  }else{
     if(S.ativos.some(a=>a.ticker===t)){alert('Já existe um ativo com esse ticker.');return;}
-    S.ativos.push({id:uid(),...dado});
+    S.ativos.push({id:uid(),meta:0,metaAuto:true,...dado});
+    rebalancearClasse(dado.classe);
   }
   save();cancelEdit();renderAll();
 });
@@ -478,7 +508,7 @@ function cancelEdit(){
   document.getElementById('fa-title').textContent='Novo ativo';
   document.getElementById('a-cancel').style.display='none';
   document.getElementById('f-ativo').reset();
-  document.getElementById('a-nota').value=10;document.getElementById('a-meta').value=0;
+  document.getElementById('a-nota').value=10;
 }
 function editAtivo(id){
   const a=S.ativos.find(x=>x.id===id);if(!a)return;
@@ -488,17 +518,19 @@ function editAtivo(id){
   document.getElementById('a-ticker').value=a.ticker;
   selClasse.value=a.classe;
   document.getElementById('a-nota').value=a.nota;
-  document.getElementById('a-meta').value=a.meta;
   document.getElementById('a-preco').value=a.preco||'';
   window.scrollTo({top:0,behavior:'smooth'});
 }
 function delAtivo(id){
   const a=S.ativos.find(x=>x.id===id);
   if(!confirm('Apagar '+a.ticker+' e todos os lançamentos e proventos dele?'))return;
+  const classe=a.classe;
   S.ativos=S.ativos.filter(x=>x.id!==id);
   S.lanc=S.lanc.filter(l=>l.ativoId!==id);
   S.prov=S.prov.filter(p=>p.ativoId!==id);
+  rebalancearClasse(classe);
   save();renderAll();
+
 }
 function metaEfetiva(a){return (S.cfg.metaClasse[a.classe]||0)*(a.meta||0)/100;}
 function renderAtivos(){
@@ -514,7 +546,13 @@ function renderAtivos(){
       '<td class="num sens">'+(a.preco>0?fmt(a.preco):'<span style="color:var(--muted)">PM</span>')+'</td>'+
       '<td class="num sens">'+fmt(a.valor)+'</td>'+
       '<td class="num">'+a.pct.toFixed(1)+'%</td>'+
-      '<td class="num">'+a.meta.toFixed(1)+'%</td>'+
+      '<td class="num">'+
+        '<input type="number" min="0" max="100" step="0.1" value="'+a.meta.toFixed(1)+'" '+
+        'onchange="setMetaManual(\''+a.id+'\',this.value)" '+
+        'style="width:62px;text-align:right;padding:4px 6px;border-radius:7px;font:inherit;background:#fff;'+
+        'border:1px solid '+(a.metaAuto===false?'var(--brass)':'var(--line)')+'"> '+
+        (a.metaAuto===false?'<button class="act" title="Voltar ao automático" onclick="setMetaAuto(\''+a.id+'\')">⟳</button>':'<span class="tag" style="font-size:9.5px">auto</span>')+
+      '</td>'+
       '<td class="num">'+metaEfetiva(a).toFixed(1)+'%</td>'+
       '<td><button class="act" onclick="editAtivo(\''+a.id+'\')" title="Editar">✎</button><button class="act" onclick="delAtivo(\''+a.id+'\')" title="Apagar">🗑</button></td></tr>').join('')+
     '</tbody></table>';
